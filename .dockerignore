@@ -12,7 +12,6 @@ __pycache__/
 .DS_Store
 
 # 数据库文件
-# (我们不希望把我们的个人下载历史上传到 GitHub)
 *.db
 *.sqlite
 *.sqlite3
