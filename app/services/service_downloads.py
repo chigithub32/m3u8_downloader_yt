@@ -10,7 +10,7 @@ import sys
 import time
 import os
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, Any, List
 import shutil
 
 # 【【V6 核心】】 导入我们的 Repository (数据库) 层
@@ -403,3 +403,4 @@ class DownloaderService:
 
 # --- 【【核心：创建单例】】 (保持不变) ---
 downloader_service = DownloaderService()
+
