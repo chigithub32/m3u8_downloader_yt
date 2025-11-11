@@ -1,31 +1,35 @@
-# Dockerfile
-
-# 1. 基础：从一个“空白的”、已安装 Python 3.10 的 Linux (Debian) 开始
+# 1. 使用一个轻量级的 Python 3.10 基础镜像
 FROM python:3.10-slim
 
-# 2. 【系统依赖】
-# 在这个“空白”系统上安装 ffmpeg/ffprobe。
-# (这等同于我们在 OpenWrt 上运行 opkg install ffmpeg)
-# (sqlite3 已经包含在 python:3.10-slim 中了)
+# 2. 安装系统依赖
+# (项目需要 ffmpeg 来处理视频)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. 设置工作目录
+# 3. 设置容器内的工作目录
 WORKDIR /app
 
-# 4. 【Python 依赖】
-# 复制 "requirements.txt"
+# 4. 复制依赖文件
+# (先复制这一个文件是为了利用 Docker 的构建缓存)
 COPY requirements.txt .
 
-# 运行 pip install
-# (在 Debian 容器内, pip install psutil/pycryptodomex 会 100% 成功)
-RUN pip install --no-cache-dir -r requirements.txt
+# 5. 安装 Python 依赖
+# (使用你指定的清华源来加速)
+RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
+RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
-# 5. 【复制代码】
-# 复制你的 *所有* 代码 (app/, dist/, run.py) 到容器的 /app 目录
+# 6. 复制项目的所有文件到工作目录
 COPY . .
 
-# 6. 【启动命令】
-# (运行我们已修改为 5001 端口的 run.py)
+# 7. 声明数据卷
+# (该项目会将下载的文件和日志保存在 ./data 目录，我们将其声明为卷)
+VOLUME /app/data
+
+# 8. 暴露端口
+# (根据 config.py，Web 服务默认运行在 5000 端口)
+EXPOSE 5000
+
+# 9. 容器启动时运行的命令
+# (启动 run.py，它会以 0.0.0.0:5000 运行)
 CMD ["python", "run.py"]
