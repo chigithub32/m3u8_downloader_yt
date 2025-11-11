@@ -1,5 +1,5 @@
 # app/services/service_downloads.py
-# (V8.4 - 最终修复版：修复了 get_system_drives 过滤)
+# (V8.5 - 最终修复版：修复了 get_system_drives 过滤, 增加了 MOUNTPOINT_BLACKLIST)
 
 import psutil
 import uuid
@@ -28,15 +28,15 @@ class DownloaderService:
         self.live_tasks: Dict[str, dict] = {} 
         # 确保根目录存在
         DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-        print(f"--- [SERVICE] DownloaderService V8.4 Singleton created.")
+        print(f"--- [SERVICE] DownloaderService V8.5 Singleton created.")
         print(f"--- [SERVICE] 下载根目录 (DOWNLOAD_ROOT): {DOWNLOAD_ROOT}")
 
-    # --- 【【【V8.4 核心修复：更智能的驱动器过滤】】】 ---
+    # --- 【【【V8.5 核心修复：更智能的驱动器过滤】】】 ---
     def get_system_drives(self):
         """
-        (V8.4) 使用 psutil 获取所有 *真实的、可写的* 挂载点
+        (V8.5) 使用 psutil 获取所有 *真实的、可写的* 挂载点
         """
-        print("--- [SERVICE] get_system_drives() (V8.4) called")
+        print("--- [SERVICE] get_system_drives() (V8.5) called")
         drives = []
         
         # (定义我们不想要的 "虚拟" 文件系统类型)
@@ -50,6 +50,15 @@ class DownloaderService:
             'overlay' # (通常是 /overlay, 我们只想看 *数据* 盘)
         ]
         
+        # --- 【【【 V8.5 修复：在此处添加新代码 】】】 ---
+        # (定义我们不想要的 "虚拟" 挂载点路径)
+        MOUNTPOINT_BLACKLIST = [
+            '/etc/resolv.conf',
+            '/etc/hostname',
+            '/etc/hosts'
+        ]
+        # --- 【【【 V8.5 修复结束 】】】 ---
+        
         try:
             partitions = psutil.disk_partitions()
             for p in partitions:
@@ -57,6 +66,13 @@ class DownloaderService:
                 # p.mountpoint -> /mnt/sata1-1
                 # p.fstype -> ext4
                 # p.opts -> "rw,relatime"
+                
+                # --- 【【【 V8.5 修复：在此处添加新代码 】】】 ---
+                # 【【修复 0】】 过滤掉黑名单中的挂载点
+                if p.mountpoint in MOUNTPOINT_BLACKLIST:
+                    print(f"--- [SERVICE] Skipping blacklisted mountpoint: {p.mountpoint}")
+                    continue
+                # --- 【【【 V8.5 修复结束 】】】 ---
                 
                 # 【【修复 1】】 过滤掉非 /dev/ 启动的设备 (e.g., /etc/hostname)
                 if not p.device.startswith('/dev/'):
@@ -403,4 +419,3 @@ class DownloaderService:
 
 # --- 【【核心：创建单例】】 (保持不变) ---
 downloader_service = DownloaderService()
-
