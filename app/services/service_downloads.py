@@ -1,5 +1,5 @@
 # app/services/service_downloads.py
-# (V8.5 - 最终修复版：修复了 get_system_drives 过滤, 增加了 MOUNTPOINT_BLACKLIST)
+# (V8.6 - 修复版：修复 yt-dlp 路径，解除下载目录限制，支持 Docker 任意挂载)
 
 import psutil
 import uuid
@@ -28,8 +28,8 @@ class DownloaderService:
         self.live_tasks: Dict[str, dict] = {} 
         # 确保根目录存在
         DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-        print(f"--- [SERVICE] DownloaderService V8.5 Singleton created.")
-        print(f"--- [SERVICE] 下载根目录 (DOWNLOAD_ROOT): {DOWNLOAD_ROOT}")
+        print(f"--- [SERVICE] DownloaderService V8.6 Singleton created.")
+        print(f"--- [SERVICE] 默认下载根目录 (DOWNLOAD_ROOT): {DOWNLOAD_ROOT}")
 
     # --- 【【【V8.5 核心修复：更智能的驱动器过滤】】】 ---
     def get_system_drives(self):
@@ -107,19 +107,20 @@ class DownloaderService:
             # (V8.4 修复) 返回空列表而不是错误字典，防止 Pydantic 验证失败
             return []
 
-    # --- 【【V8 核心修改：start_new_download】】 ---
+    # --- 【【V8.6 核心修改：start_new_download】】 ---
     def start_new_download(self, url: str, subdirectory: Optional[str], custom_name: Optional[str]) -> str:
         """
-        (V8) 创建任务, *写入数据库*, 并启动后台线程
+        (V8.6) 创建任务, *写入数据库*, 并启动后台线程
         """
         
-        # 1. 确定最终的下载目录
+        # --- 【修改开始：解除路径限制】 ---
+        # 原代码强制使用 DOWNLOAD_ROOT 拼接目录名，导致只能下到 downloads 下
+        # 修改为：如果用户提供了路径（通常是绝对路径），直接使用它
         if subdirectory:
-            # 安全地拼接路径, 防止 ".." 路径遍历
-            safe_subdir = Path(subdirectory).name 
-            download_dir = DOWNLOAD_ROOT.joinpath(safe_subdir)
+            download_dir = Path(subdirectory)
         else:
             download_dir = DOWNLOAD_ROOT
+        # --- 【修改结束】 ---
         
         print(f"--- [SERVICE] start_new_download() called. Path: {download_dir}")
         
@@ -132,18 +133,18 @@ class DownloaderService:
         task_id = str(uuid.uuid4())
         log_queue = queue.Queue()
         
-        # (V8) 只存储相对路径
-        relative_path_str = str(download_dir.relative_to(DOWNLOAD_ROOT))
-        # (修复 Windows/Linux 路径分隔符, 统一用 / )
+        # --- 【修改开始：存储绝对路径】 ---
+        # 修改为：直接存储绝对路径字符串，不再计算 relative_to
+        relative_path_str = str(download_dir.resolve())
+        # 统一路径分隔符
         relative_path_str = relative_path_str.replace('\\', '/')
-        if relative_path_str == ".":
-            relative_path_str = "" # 根目录
+        # --- 【修改结束】 ---
 
         task_data_to_db = {
             "id": task_id,
             "status": "pending",
             "url": url,
-            "path": relative_path_str, # <-- 【V8】只存储 *相对* 路径
+            "path": relative_path_str, # <-- 现在这里存的是绝对路径
             "custom_name": custom_name,
             "startTime": time.time()
         }
@@ -201,8 +202,10 @@ class DownloaderService:
             # (V6.4) 下载到 *隔离区*, 自动命名
             output_template = str(tmp_dir.joinpath("%(title)s.%(ext)s"))
 
+            # --- 【修改开始：修复 yt-dlp 路径问题】 ---
+            # 使用 sys.executable -m yt_dlp 替代直接调用 "yt-dlp" 命令
             command = [
-                "yt-dlp",
+                sys.executable, "-m", "yt_dlp", 
                 "--merge-output-format", "mkv",
                 "-o", output_template,
                 "--progress",
@@ -211,6 +214,8 @@ class DownloaderService:
                 "--concurrent-fragments", "5",
                 db_task["url"]
             ]
+            # --- 【修改结束】 ---
+            
             log(f"执行命令: {' '.join(command)}")
 
             startupinfo = None
@@ -358,20 +363,19 @@ class DownloaderService:
         print(f"--- [SERVICE] get_task_status() called for task: {task_id}")
         return db.get_task_by_id(task_id)
 
-    # --- 【【V8 核心修改：delete_file_from_server】】 ---
+    # --- 【【V8.6 核心修改：delete_file_from_server】】 ---
     def delete_file_from_server(self, file_path_relative: str) -> dict:
         """
-        (V8) 从服务器删除一个 *相对* 路径的文件
+        (V8.6) 从服务器删除文件，允许删除任意绝对路径的文件
         """
         print(f"--- [SERVICE] delete_file_from_server() called. Path: {file_path_relative}")
         
         try:
-            # 【V8 安全】
-            file_to_delete = DOWNLOAD_ROOT.joinpath(file_path_relative).resolve()
+            # --- 【修改开始：解除删除限制】 ---
+            # 修改为：直接使用数据库中存储的路径（现在是绝对路径）
+            file_to_delete = Path(file_path_relative).resolve()
+            # --- 【修改结束】 ---
             
-            if DOWNLOAD_ROOT not in file_to_delete.parents:
-                 return {"success": False, "message": "Invalid path (Path Traversal)."}
-                 
             if file_to_delete.is_file():
                 file_to_delete.unlink()
                 return {"success": True, "message": f"Deleted {file_to_delete}"}
